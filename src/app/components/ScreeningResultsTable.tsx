@@ -442,10 +442,10 @@ export function ScreeningResultsTable({
                           })
                         }
                         className={cn(
-                          "rounded-[4px] px-3.5 py-1.5 text-[13px] font-['Noto_Sans:SemiBold',sans-serif] font-semibold transition-all duration-200 ease-out border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#523eb9]/40 focus-visible:ring-offset-2",
+                          "cursor-pointer rounded-[4px] px-3.5 py-1.5 text-[13px] font-['Noto_Sans:SemiBold',sans-serif] font-semibold transition-all duration-200 ease-out border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#523eb9]/40 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-[#22272b]",
                           active
-                            ? "bg-[#efeef9] border-[#523eb9] text-[#523eb9]"
-                            : "bg-white dark:bg-[#22272b] border-[#cfd2d9] dark:border-[#38414a] text-[#23262c] dark:text-[#b6c2cf] hover:border-[#949baa]",
+                            ? "bg-[#efeef9] border-[#523eb9] text-[#523eb9] hover:bg-[#e4dff3] hover:border-[#4334a3] dark:bg-[#2a2540] dark:border-[#7c6bc4] dark:text-[#dcd7e8] dark:hover:bg-[#352f4d] dark:hover:border-[#9b8ed4]"
+                            : "bg-white dark:bg-[#22272b] border-[#cfd2d9] dark:border-[#38414a] text-[#23262c] dark:text-[#b6c2cf] hover:border-[#949baa] hover:bg-[#f5f6f8] dark:hover:border-[#5c6773] dark:hover:bg-[#2c333a]",
                         )}
                         style={{ fontVariationSettings: "'CTGR' 0, 'wdth' 100" }}
                       >

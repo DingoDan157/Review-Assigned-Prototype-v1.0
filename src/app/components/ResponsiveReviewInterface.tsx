@@ -463,13 +463,13 @@ function softHeaderTag(text: string) {
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-full pl-1.5 pr-2.5 py-1",
+        "inline-flex h-6 min-w-6 shrink-0 items-center justify-center rounded-full px-2.5 leading-none",
         screeningNewPillSurfaceClass,
+        screeningNewPillLabelClass,
       )}
+      style={{ fontVariationSettings: "'CTGR' 0, 'wdth' 100" }}
     >
-      <span className={screeningNewPillLabelClass} style={{ fontVariationSettings: "'CTGR' 0, 'wdth' 100" }}>
-        {text}
-      </span>
+      {text}
     </span>
   );
 }
