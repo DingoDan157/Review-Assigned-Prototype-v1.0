@@ -54,7 +54,12 @@ $env:VITE_BASE_PATH="/YOUR_REPO_NAME/"; npm run build; npm run preview
 
 ### Blank white page on GitHub Pages
 
-1. Confirm the **Actions** workflow completed successfully.
-2. In the browser, press **F12 → Network**, reload, and check whether **`index-*.js`** or **`index-*.css`** is **404** (wrong path). This project includes **`public/.nojekyll`** so GitHub does not run Jekyll on your files.
+1. **“There isn’t a GitHub Pages site here” (404):** Nothing is published yet. Open **Actions** → **Deploy GitHub Pages** → open the latest run. If it is **red** or **waiting for approval**, fix that first (failed `npm ci` / build, or approve the deployment). Then **Settings → Pages** → **Source** must be **GitHub Actions** (not “Deploy from a branch”). After a **green** deploy, wait 1–2 minutes and reload.
+
+2. **Environment approval:** **Settings → Environments → github-pages** — if **Required reviewers** is on, open the workflow run and click **Review deployments** → **Approve**, or turn off that rule for personal prototypes.
+
+3. **Wrong Pages source:** Right‑click the live site → **View Page Source**. If you see `src="/src/main.tsx"`, GitHub is serving **raw repo files**. Switch **Settings → Pages → Source** to **GitHub Actions**, wait for a green workflow, then reload.
+
+4. In the browser, press **F12 → Network**, reload, and check **`index-*.js`** / **`index-*.css`**. A good deploy shows script `src` like `/Your-Repo-Name/assets/index-….js`. This project includes **`public/.nojekyll`** so GitHub does not run Jekyll on your files.
 
 Build (same as CI): `npm run build` → output in `dist/`.
