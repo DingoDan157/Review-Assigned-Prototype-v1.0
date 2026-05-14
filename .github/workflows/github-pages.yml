@@ -35,10 +35,9 @@ jobs:
         run: npm ci
 
       - name: Build
-        run: npm run build
         env:
-          # Must match the repository name segment in https://<owner>.github.io/<repo>/
-          GITHUB_PAGES_BASE: /${{ github.event.repository.name }}/
+          VITE_BASE_PATH: /${{ github.event.repository.name }}/
+        run: npm run build
 
       - uses: actions/upload-pages-artifact@v3
         with:

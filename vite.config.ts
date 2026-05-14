@@ -19,17 +19,19 @@ function figmaAssetResolver() {
   }
 }
 
-// GitHub Pages project sites live at https://<user>.github.io/<repo>/ — set in CI (see .github/workflows).
-const pagesBase = process.env.GITHUB_PAGES_BASE?.trim()
-const base =
-  pagesBase && pagesBase !== '/'
-    ? pagesBase.endsWith('/')
-      ? pagesBase
-      : `${pagesBase}/`
-    : '/'
+// Local dev: `/`. GitHub Actions sets `VITE_BASE_PATH` to `/<repo>/` so asset URLs work with or
+// without a trailing slash on `…github.io/<repo>` (relative `./` bases break without `/`).
+function viteBase(): string {
+  const raw = process.env.VITE_BASE_PATH?.trim()
+  if (!raw || raw === '/') {
+    return '/'
+  }
+  const withLeading = raw.startsWith('/') ? raw : `/${raw}`
+  return withLeading.endsWith('/') ? withLeading : `${withLeading}/`
+}
 
 export default defineConfig({
-  base,
+  base: viteBase(),
   plugins: [
     figmaAssetResolver(),
     // The React and Tailwind plugins are both required for Make, even if

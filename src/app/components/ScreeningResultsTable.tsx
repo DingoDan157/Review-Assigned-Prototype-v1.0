@@ -1,9 +1,26 @@
-import { useMemo, useState, useCallback, Fragment, useEffect, useId, useRef } from "react";
+import {
+  useMemo,
+  useState,
+  useCallback,
+  Fragment,
+  useEffect,
+  useId,
+  useRef,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 import { ArrowDown, ArrowDownUp, ArrowUp, ChevronDown, ChevronRight, Eye, EyeOff } from "lucide-react";
 import { Checkbox } from "./ui/checkbox";
 import { cn } from "./ui/utils";
 
-export type ScreeningRowStatus = "New" | "Safe";
+export type ScreeningRowStatus = "New" | "Escalated";
+
+/** Shared lavender pill surface (table “New” badge, profile header tags, in‑process tile) — same in light and dark. */
+export const screeningNewPillSurfaceClass =
+  "border border-[#d6cef5] bg-[#f4f1fc] transition-colors duration-200 ease-out dark:border-[#d6cef5] dark:bg-[#f4f1fc]";
+
+export const screeningNewPillLabelClass =
+  "font-['Noto_Sans:SemiBold',sans-serif] text-[12px] text-[#523eb9]";
 
 export type ScreeningResultRow = {
   id: string;
@@ -16,16 +33,72 @@ export type ScreeningResultRow = {
   status: ScreeningRowStatus;
 };
 
-const MOCK_ROWS: ScreeningResultRow[] = [
-  { id: "1", name: "John Smith", dob: "03/23/1978", matchAgeLabel: "4h", matchAgeTone: "fresh", matchScore: 93, matchTiles: ["E", "B", "N", "C1", "E", "N", "B"], status: "New" },
-  { id: "2", name: "John A. Smith", dob: "03/23/1978", matchAgeLabel: "9h", matchAgeTone: "fresh", matchScore: 88, matchTiles: ["E", "N", "C2", "B", "E", "N", "N"], status: "New" },
-  { id: "3", name: "Johnny Smith", dob: "03/23/1978", matchAgeLabel: "12h", matchAgeTone: "warn", matchScore: 72, matchTiles: ["N", "B", "C1", "E", "N", "B", "E"], status: "New" },
-  { id: "4", name: "Smith, John", dob: "03/23/1978", matchAgeLabel: "18h", matchAgeTone: "warn", matchScore: 65, matchTiles: ["E", "E", "N", "C2", "B", "N", "N"], status: "New" },
-  { id: "5", name: "John Smythe", dob: "03/21/1978", matchAgeLabel: "22h", matchAgeTone: "stale", matchScore: 54, matchTiles: ["N", "C1", "B", "E", "N", "B", "B"], status: "New" },
-  { id: "6", name: "Jonathan Smith", dob: "03/23/1978", matchAgeLabel: "1d", matchAgeTone: "stale", matchScore: 41, matchTiles: ["B", "N", "E", "C1", "N", "E", "N"], status: "Safe" },
-  { id: "7", name: "John P. Smith", dob: "03/23/1978", matchAgeLabel: "1d", matchAgeTone: "stale", matchScore: 36, matchTiles: ["E", "N", "B", "B", "C2", "N", "E"], status: "Safe" },
-  { id: "8", name: "Jack Smith", dob: "03/23/1978", matchAgeLabel: "2d", matchAgeTone: "stale", matchScore: 28, matchTiles: ["N", "B", "E", "N", "C1", "B", "E"], status: "Safe" },
+const CASE_RESULT_COUNTS = [8, 8, 7, 5, 3, 2] as const;
+
+const CASE_VARIANT_NAMES: readonly (readonly string[])[] = [
+  ["John Smith", "John A. Smith", "J. Smith", "Smith, John", "Johnny Smith", "Jon P. Smith", "John Smyth", "Smith, Johnathan"],
+  ["Mr. Jose A Gonzalez", "Jose Antonio Gonzalez", "J. A. Gonzalez", "Gonzalez, Jose", "Jose A. Gonzales", "J. Gonzalez", "Jose González", "Gonzalez Jose"],
+  ["Muammar Qadhafi", "Muammar Gaddafi", "Moammar Qaddafi", "Qadhafi, Muammar", "Kadhafi Muammar", "Al-Qadhafi Muammar", "Muammar Al Qathafi"],
+  ["Jane Doe", "J. Doe", "Doe, Jane", "Janet Doe", "Jane D. Oe"],
+  ["Bank of Iran", "Bank Melli Iran", "Iranian Banking Corp."],
+  ["Bank of Moscow", "Moscow Joint Stock Bank"],
 ];
+
+const AGE_LABELS = ["4h", "9h", "12h", "18h", "22h", "1d", "2d", "3d"] as const;
+const TONE_ROTATION: ScreeningResultRow["matchAgeTone"][] = ["fresh", "fresh", "warn", "warn", "stale", "stale", "stale", "fresh"];
+
+const TILE_ROTATIONS = [
+  ["E", "B", "N", "C1", "E", "N", "B"],
+  ["E", "N", "C2", "B", "E", "N", "N"],
+  ["N", "B", "C1", "E", "N", "B", "E"],
+  ["E", "E", "N", "C2", "B", "N", "N"],
+  ["N", "C1", "B", "E", "N", "B", "B"],
+] as const;
+
+function rowStatusForIndex(index: number, total: number, caseIndex: number): ScreeningRowStatus {
+  if (caseIndex === 4 && total === 3) {
+    return index === 2 ? "Escalated" : "New";
+  }
+  if (caseIndex === 1 && total === 8) {
+    return index === 0 ? "New" : "Escalated";
+  }
+  if (caseIndex === 2 && total === 7) {
+    return index < 2 ? "New" : "Escalated";
+  }
+  if (total >= 3 && index >= total - 3) return "Escalated";
+  if (total < 3 && index === total - 1) return "Escalated";
+  return "New";
+}
+
+function dobForCase(caseIndex: number): string {
+  const dobs = ["03/23/1978", "04/11/1985", "06/07/1942", "09/14/1992", "—", "—"];
+  return dobs[Math.min(caseIndex, dobs.length - 1)];
+}
+
+export function getScreeningRowsForCase(caseIndex: number): ScreeningResultRow[] {
+  const ci = Math.max(0, Math.min(caseIndex, CASE_RESULT_COUNTS.length - 1));
+  const total = CASE_RESULT_COUNTS[ci];
+  const names = CASE_VARIANT_NAMES[ci];
+  const rows: ScreeningResultRow[] = [];
+  for (let i = 0; i < total; i++) {
+    const name = names[Math.min(i, names.length - 1)];
+    const score = Math.max(22, 93 - i * 7 - (ci % 3) * 2);
+    const tiles = TILE_ROTATIONS[i % TILE_ROTATIONS.length];
+    rows.push({
+      id: `c${ci}-${i + 1}`,
+      name,
+      dob: dobForCase(ci),
+      matchAgeLabel: AGE_LABELS[i % AGE_LABELS.length],
+      matchAgeTone: TONE_ROTATION[i % TONE_ROTATION.length],
+      matchScore: score,
+      matchTiles: [...tiles],
+      status: rowStatusForIndex(i, total, ci),
+    });
+  }
+  return rows;
+}
+
+export const MOCK_ROWS: ScreeningResultRow[] = getScreeningRowsForCase(0);
 
 const MATCH_KEY_ITEMS: { code: string; label: string; bg: string; fg: string; border: string }[] = [
   { code: "E", label: "Equal", bg: "#fdeaea", fg: "#9e2a2a", border: "rgba(194,40,40,0.12)" },
@@ -69,7 +142,7 @@ function parseAgeForSort(label: string): number {
 }
 
 const checkboxClass =
-  "h-4 w-4 shrink-0 rounded-[3px] border-[#523eb9] border bg-white text-white transition-all duration-200 ease-out data-[state=checked]:bg-[#523eb9] data-[state=checked]:border-[#523eb9] focus-visible:ring-2 focus-visible:ring-[#523eb9]/35 [&_svg]:size-3";
+  "h-4 w-4 shrink-0 rounded-[3px] border-[#523eb9] border bg-white dark:bg-[#22272b] text-white transition-all duration-200 ease-out data-[state=checked]:bg-[#523eb9] data-[state=checked]:border-[#523eb9] data-[state=indeterminate]:bg-[#523eb9] data-[state=indeterminate]:border-[#523eb9] focus-visible:ring-2 focus-visible:ring-[#523eb9]/35 [&_svg]:size-3 disabled:cursor-default disabled:opacity-50 disabled:border-[#cfd2d9] dark:disabled:border-[#454c59] disabled:data-[state=checked]:bg-[#d4d6db] disabled:data-[state=checked]:border-[#cfd2d9] disabled:data-[state=indeterminate]:bg-[#d4d6db] disabled:data-[state=indeterminate]:border-[#cfd2d9]";
 
 /** Smooth open/close for accordions and expandable rows (Material-style deceleration). */
 const easeAccordion = "[transition-timing-function:cubic-bezier(0.32,0.72,0,1)]";
@@ -80,16 +153,38 @@ interface ScreeningResultsTableProps {
   title?: string;
   /** Optional root classes (e.g. `w-full`). Table body scroll is internal to the component; avoid `flex-1` on the root so the closed accordion does not stretch. */
   className?: string;
+  /** When both are passed, row selection is controlled by the parent (e.g. task bar). */
+  selectedIds?: Set<string>;
+  onSelectedIdsChange?: Dispatch<SetStateAction<Set<string>>>;
 }
 
-export function ScreeningResultsTable({ rows = MOCK_ROWS, title = "Screening Results", className }: ScreeningResultsTableProps) {
+export function ScreeningResultsTable({
+  rows = MOCK_ROWS,
+  title = "Screening Results",
+  className,
+  selectedIds: selectedIdsProp,
+  onSelectedIdsChange,
+}: ScreeningResultsTableProps) {
   const tableCaptionId = useId();
   /** Empty set = no filter (show all). Otherwise rows must match one of the selected statuses. */
   const [statusFilters, setStatusFilters] = useState<Set<ScreeningRowStatus>>(() => new Set());
   const [sortKey, setSortKey] = useState<SortKey | null>(null);
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [internalSelectedIds, setInternalSelectedIds] = useState<Set<string>>(() => new Set());
+  const isSelectionControlled =
+    selectedIdsProp !== undefined && onSelectedIdsChange !== undefined;
+  const selectedIds = isSelectionControlled ? selectedIdsProp : internalSelectedIds;
+  const setSelectedIds = useCallback(
+    (action: SetStateAction<Set<string>>) => {
+      if (isSelectionControlled) {
+        onSelectedIdsChange!(action);
+      } else {
+        setInternalSelectedIds(action);
+      }
+    },
+    [isSelectionControlled, onSelectedIdsChange],
+  );
   const [sectionCollapsed, setSectionCollapsed] = useState(false);
   const [matchKeyOpen, setMatchKeyOpen] = useState(false);
 
@@ -138,14 +233,18 @@ export function ScreeningResultsTable({ rows = MOCK_ROWS, title = "Screening Res
     return list;
   }, [filteredRows, sortKey, sortDir]);
 
-  const visibleIdKey = useMemo(() => sortedRows.map((r) => r.id).sort().join(","), [sortedRows]);
+  const selectionRowsSignature = useMemo(
+    () => sortedRows.map((r) => `${r.id}:${r.status}`).join(","),
+    [sortedRows],
+  );
 
   useEffect(() => {
-    const allow = new Set(visibleIdKey.split(",").filter(Boolean));
+    const allow = new Set(sortedRows.map((r) => r.id));
+    const allowNew = new Set(sortedRows.filter((r) => r.status === "New").map((r) => r.id));
     setSelectedIds((prev) => {
       const next = new Set<string>();
       prev.forEach((id) => {
-        if (allow.has(id)) next.add(id);
+        if (allowNew.has(id)) next.add(id);
       });
       return next;
     });
@@ -156,7 +255,7 @@ export function ScreeningResultsTable({ rows = MOCK_ROWS, title = "Screening Res
       });
       return next;
     });
-  }, [visibleIdKey]);
+  }, [selectionRowsSignature, setSelectedIds]);
 
   const selectedRef = useRef(selectedIds);
   const filterRef = useRef(statusFilters);
@@ -180,7 +279,7 @@ export function ScreeningResultsTable({ rows = MOCK_ROWS, title = "Screening Res
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
-  const reviewedCount = useMemo(() => rows.filter((r) => r.status === "Safe").length, [rows]);
+  const reviewedCount = useMemo(() => rows.filter((r) => r.status === "Escalated").length, [rows]);
   const totalCount = rows.length;
   const progress = totalCount === 0 ? 0 : (reviewedCount / totalCount) * 100;
 
@@ -189,9 +288,11 @@ export function ScreeningResultsTable({ rows = MOCK_ROWS, title = "Screening Res
   const allVisibleExpanded =
     sortedRows.length > 0 && sortedRows.every((r) => expandedIds.has(r.id));
 
+  const actionableRows = useMemo(() => sortedRows.filter((r) => r.status === "New"), [sortedRows]);
+
   const allVisibleSelected =
-    sortedRows.length > 0 && sortedRows.every((r) => selectedIds.has(r.id));
-  const someVisibleSelected = sortedRows.some((r) => selectedIds.has(r.id));
+    actionableRows.length > 0 && actionableRows.every((r) => selectedIds.has(r.id));
+  const someVisibleSelected = actionableRows.some((r) => selectedIds.has(r.id));
 
   const toggleSort = (key: SortKey) => {
     if (sortKey !== key) {
@@ -220,11 +321,14 @@ export function ScreeningResultsTable({ rows = MOCK_ROWS, title = "Screening Res
   };
 
   const onHeaderSelectAllChange = (value: boolean | "indeterminate") => {
+    if (actionableRows.length === 0) return;
     if (value === true) {
-      setSelectedIds(new Set(sortedRows.map((r) => r.id)));
+      setSelectedIds(new Set(actionableRows.map((r) => r.id)));
       return;
     }
-    setSelectedIds(new Set());
+    if (value === false) {
+      setSelectedIds(new Set());
+    }
   };
 
   const toggleRowSelect = (id: string, checked: boolean) => {
@@ -242,12 +346,12 @@ export function ScreeningResultsTable({ rows = MOCK_ROWS, title = "Screening Res
   return (
     <div
       className={cn(
-        "bg-white border border-[#cfd2d9] rounded overflow-hidden transition-shadow duration-200 ease-out hover:shadow-sm flex w-full flex-col shrink-0",
+        "bg-white dark:bg-[#22272b] border border-[#cfd2d9] dark:border-[#38414a] rounded overflow-hidden shadow-[0_1px_2px_rgba(35,38,44,0.06),0_2px_8px_rgba(35,38,44,0.08)] transition-shadow duration-200 ease-out hover:shadow-[0_2px_4px_rgba(35,38,44,0.08),0_4px_12px_rgba(35,38,44,0.1)] dark:shadow-[0_1px_2px_rgba(0,0,0,0.35)] flex w-full flex-col shrink-0",
         className,
       )}
     >
       <div
-        className="flex min-h-[56px] items-center justify-between gap-3 px-4 py-3 cursor-pointer select-none transition-colors duration-200 ease-out hover:bg-[#fafafb] shrink-0"
+        className="flex min-h-[56px] items-center justify-between gap-3 px-4 py-3 cursor-pointer select-none transition-colors duration-200 ease-out hover:bg-[#eff0f2] dark:hover:bg-[#2c333a] shrink-0"
         onClick={() => setSectionCollapsed((c) => !c)}
         role="button"
         tabIndex={0}
@@ -269,10 +373,10 @@ export function ScreeningResultsTable({ rows = MOCK_ROWS, title = "Screening Res
             )}
             aria-hidden
           >
-            <ChevronDown className="size-4 text-[#23262c]" strokeWidth={2} />
+            <ChevronDown className="size-4 text-[#23262c] dark:text-[#b6c2cf]" strokeWidth={2} />
           </div>
           <p
-            className="font-['Noto_Sans:SemiBold',sans-serif] font-semibold leading-[1.5] text-[#23262c] text-[15px] truncate"
+            className="font-['Noto_Sans:SemiBold',sans-serif] font-semibold leading-[1.5] text-[#23262c] dark:text-[#b6c2cf] text-[15px] truncate"
             style={{ fontVariationSettings: "'CTGR' 0, 'wdth' 100" }}
           >
             {title}
@@ -283,13 +387,13 @@ export function ScreeningResultsTable({ rows = MOCK_ROWS, title = "Screening Res
           onClick={(e) => e.stopPropagation()}
         >
           <span
-            className="hidden sm:inline font-['Noto_Sans:Regular',sans-serif] text-[13px] text-[#464c59] whitespace-nowrap"
+            className="hidden sm:inline font-['Noto_Sans:Regular',sans-serif] text-[13px] text-[#464c59] dark:text-[#9fadbc] whitespace-nowrap"
             style={{ fontVariationSettings: "'CTGR' 0, 'wdth' 100" }}
           >
             {reviewedCount} of {totalCount} Reviewed
           </span>
           <div
-            className="w-[120px] h-2 rounded-full bg-[#eff0f2] overflow-hidden border border-[#e4e6ea]"
+            className="w-[120px] h-2 rounded-full bg-[#eff0f2] dark:bg-[#2c333a] overflow-hidden border border-[#e4e6ea] dark:border-[#38414a]"
             role="progressbar"
             aria-valuemin={0}
             aria-valuemax={totalCount}
@@ -306,7 +410,7 @@ export function ScreeningResultsTable({ rows = MOCK_ROWS, title = "Screening Res
 
       <div
         className={cn(
-          "grid border-t border-[#cfd2d9] transition-[grid-template-rows]",
+          "grid border-t border-[#cfd2d9] dark:border-[#38414a] transition-[grid-template-rows]",
           durationAccordion,
           easeAccordion,
           sectionCollapsed ? "grid-rows-[0fr]" : "grid-rows-[1fr]",
@@ -314,13 +418,13 @@ export function ScreeningResultsTable({ rows = MOCK_ROWS, title = "Screening Res
       >
         <div className={cn("flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden", sectionCollapsed && "pointer-events-none")}>
           <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden max-h-[calc(100dvh-14rem)]">
-            <div className="shrink-0 border-b border-[#cfd2d9] bg-[#fafafb] px-4 py-3">
+            <div className="shrink-0 border-b border-[#cfd2d9] dark:border-[#38414a] bg-[#fafafb] dark:bg-[#1d2125] px-4 py-3">
               <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
                 <span
-                  className="font-['Noto_Sans:SemiBold',sans-serif] text-[14px] text-[#23262c] shrink-0"
+                  className="font-['Noto_Sans:SemiBold',sans-serif] text-[14px] text-[#23262c] dark:text-[#b6c2cf] shrink-0"
                   style={{ fontVariationSettings: "'CTGR' 0, 'wdth' 100" }}
                 >
-                  Filter By
+                  Filter by
                 </span>
                 <div className="flex flex-wrap items-center gap-2 min-w-0">
                   {statusChips.map((st) => {
@@ -338,10 +442,10 @@ export function ScreeningResultsTable({ rows = MOCK_ROWS, title = "Screening Res
                           })
                         }
                         className={cn(
-                          "rounded-full px-3.5 py-1.5 text-[13px] font-['Noto_Sans:SemiBold',sans-serif] font-semibold transition-all duration-200 ease-out border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#523eb9]/40 focus-visible:ring-offset-2",
+                          "rounded-[4px] px-3.5 py-1.5 text-[13px] font-['Noto_Sans:SemiBold',sans-serif] font-semibold transition-all duration-200 ease-out border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#523eb9]/40 focus-visible:ring-offset-2",
                           active
                             ? "bg-[#efeef9] border-[#523eb9] text-[#523eb9]"
-                            : "bg-white border-[#cfd2d9] text-[#23262c] hover:border-[#949baa]",
+                            : "bg-white dark:bg-[#22272b] border-[#cfd2d9] dark:border-[#38414a] text-[#23262c] dark:text-[#b6c2cf] hover:border-[#949baa]",
                         )}
                         style={{ fontVariationSettings: "'CTGR' 0, 'wdth' 100" }}
                       >
@@ -356,12 +460,12 @@ export function ScreeningResultsTable({ rows = MOCK_ROWS, title = "Screening Res
                     aria-expanded={matchKeyOpen}
                     aria-label={matchKeyOpen ? "Hide match string key" : "Show match string key"}
                     onClick={() => setMatchKeyOpen((o) => !o)}
-                    className="inline-flex size-8 shrink-0 items-center justify-center rounded-md border border-[#cfd2d9] bg-white text-[#464c59] transition-colors duration-200 ease-out hover:border-[#949baa] hover:bg-[#eff0f2] hover:text-[#23262c] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#523eb9]/35 focus-visible:ring-offset-2"
+                    className="inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-[4px] border border-[#cfd2d9] dark:border-[#38414a] bg-white dark:bg-[#22272b] text-[#464c59] dark:text-[#9fadbc] transition-colors duration-200 ease-out hover:border-[#949baa] hover:bg-[#eff0f2] dark:hover:bg-[#2c333a] hover:text-[#23262c] dark:hover:text-[#b6c2cf] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#523eb9]/35 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-[#22272b]"
                   >
                     {matchKeyOpen ? <EyeOff className="size-4" strokeWidth={2} aria-hidden /> : <Eye className="size-4" strokeWidth={2} aria-hidden />}
                   </button>
                   <span
-                    className="font-['Noto_Sans:SemiBold',sans-serif] text-[13px] text-[#23262c] shrink-0"
+                    className="font-['Noto_Sans:SemiBold',sans-serif] text-[13px] text-[#23262c] dark:text-[#b6c2cf] shrink-0"
                     style={{ fontVariationSettings: "'CTGR' 0, 'wdth' 100" }}
                   >
                     Match string key
@@ -371,7 +475,7 @@ export function ScreeningResultsTable({ rows = MOCK_ROWS, title = "Screening Res
                       {MATCH_KEY_ITEMS.map((item) => (
                         <span
                           key={item.code}
-                          className="inline-flex items-center gap-2 font-['Noto_Sans:Regular',sans-serif] text-[12px] text-[#464c59]"
+                          className="inline-flex items-center gap-2 font-['Noto_Sans:Regular',sans-serif] text-[12px] text-[#464c59] dark:text-[#9fadbc]"
                           style={{ fontVariationSettings: "'CTGR' 0, 'wdth' 100" }}
                         >
                           <span
@@ -401,13 +505,13 @@ export function ScreeningResultsTable({ rows = MOCK_ROWS, title = "Screening Res
                   {title}, {sortedRows.length} {sortedRows.length === 1 ? "row" : "rows"}
                   {statusFilters.size > 0 ? `, filtered by ${[...statusFilters].sort((a, b) => a.localeCompare(b)).join(", ")}` : ""}
                 </caption>
-                <thead className="sticky top-0 z-[1] bg-[#fafafb] border-b border-[#cfd2d9] shadow-[0_1px_0_rgba(207,210,217,0.6)]">
+                <thead className="sticky top-0 z-[1] bg-[#fafafb] dark:bg-[#1d2125] border-b border-[#cfd2d9] dark:border-[#38414a] shadow-[0_1px_0_rgba(207,210,217,0.6)] dark:shadow-[0_1px_0_rgba(0,0,0,0.45)]">
                   <tr className="h-8">
                     <th scope="col" className="w-12 px-2 py-1 align-middle">
                       <div className="flex items-center gap-0.5">
                         <button
                           type="button"
-                          className="p-1 rounded transition-colors duration-200 ease-out hover:bg-[#eff0f2] text-[#23262c] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#523eb9]/35 focus-visible:ring-offset-2"
+                          className="p-1 rounded transition-colors duration-200 ease-out hover:bg-[#eff0f2] dark:hover:bg-[#2c333a] text-[#23262c] dark:text-[#b6c2cf] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#523eb9]/35 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-[#22272b]"
                           aria-label={allVisibleExpanded ? "Collapse all rows" : "Expand all rows"}
                           onClick={toggleExpandAll}
                         >
@@ -420,8 +524,15 @@ export function ScreeningResultsTable({ rows = MOCK_ROWS, title = "Screening Res
                         <Checkbox
                           className={checkboxClass}
                           checked={headerCheckboxState}
+                          disabled={actionableRows.length === 0}
                           onCheckedChange={onHeaderSelectAllChange}
-                          aria-label={allVisibleSelected ? "Deselect all results" : "Select all results"}
+                          aria-label={
+                            actionableRows.length === 0
+                              ? "No selectable results"
+                              : allVisibleSelected
+                                ? "Deselect all results"
+                                : "Select all results"
+                          }
                         />
                       </div>
                       <span className="sr-only">Expand and select</span>
@@ -440,10 +551,10 @@ export function ScreeningResultsTable({ rows = MOCK_ROWS, title = "Screening Res
                         <button
                           type="button"
                           onClick={() => toggleSort(key)}
-                          className="inline-flex items-center gap-1.5 rounded px-1 py-0.5 -mx-1 transition-colors duration-200 ease-out hover:bg-[#eff0f2] text-[#23262c] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#523eb9]/35 focus-visible:ring-offset-2"
+                          className="inline-flex items-center gap-1.5 rounded px-1 py-0.5 -mx-1 transition-colors duration-200 ease-out hover:bg-[#eff0f2] dark:hover:bg-[#2c333a] text-[#23262c] dark:text-[#b6c2cf] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#523eb9]/35 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-[#22272b]"
                         >
                           <span
-                            className="font-['Noto_Sans:Bold',sans-serif] font-bold text-[12px] uppercase tracking-wide text-[#6a7285]"
+                            className="font-['Noto_Sans:Bold',sans-serif] font-bold text-[12px] uppercase tracking-wide text-[#6a7285] dark:text-[#8696a7]"
                             style={{ fontVariationSettings: "'CTGR' 0, 'wdth' 100" }}
                           >
                             {label}
@@ -467,7 +578,7 @@ export function ScreeningResultsTable({ rows = MOCK_ROWS, title = "Screening Res
                     <tr>
                       <td colSpan={7} className="px-6 py-16 text-center">
                         <p
-                          className="font-['Noto_Sans:Regular',sans-serif] text-[14px] text-[#464c59] m-0 mb-3"
+                          className="font-['Noto_Sans:Regular',sans-serif] text-[14px] text-[#464c59] dark:text-[#9fadbc] m-0 mb-3"
                           style={{ fontVariationSettings: "'CTGR' 0, 'wdth' 100" }}
                         >
                           {rows.length === 0
@@ -492,18 +603,20 @@ export function ScreeningResultsTable({ rows = MOCK_ROWS, title = "Screening Res
                   {sortedRows.map((row) => {
                     const expanded = expandedIds.has(row.id);
                     const selected = selectedIds.has(row.id);
+                    const rowDone = row.status === "Escalated";
                     const showControls = selectionMode || expanded;
                     return (
                       <Fragment key={row.id}>
                         <tr
-                          aria-selected={selected}
+                          aria-selected={selected && !rowDone}
                           className={cn(
-                            "group/row border-b border-[#eff0f2] bg-white transition-[background-color,box-shadow] duration-200 ease-out",
-                            "hover:bg-[#f3f4f6] hover:shadow-[inset_2px_0_0_0_rgba(82,62,185,0.2)]",
-                            selected && "bg-[#f4f1fc]/60",
+                            "group/row border-b border-[#eff0f2] dark:border-[#333a42] transition-[background-color,box-shadow] duration-200 ease-out",
+                            rowDone && "bg-[#f3f4f6] dark:bg-[#2c333a] italic text-[#6a7285] dark:text-[#8696a7]",
+                            !rowDone && "bg-white dark:bg-[#22272b] hover:bg-[#f3f4f6] dark:hover:bg-[#2c333a] hover:shadow-[inset_2px_0_0_0_rgba(82,62,185,0.2)]",
+                            selected && !rowDone && "bg-[#f4f1fc]/60 dark:bg-[#38414a]/45",
                           )}
                         >
-                          <td className="w-12 px-2 py-3 align-middle">
+                          <td className="w-12 px-2 py-3 align-middle not-italic">
                             <div className="flex items-center gap-0.5">
                               <button
                                 type="button"
@@ -511,8 +624,10 @@ export function ScreeningResultsTable({ rows = MOCK_ROWS, title = "Screening Res
                                 aria-label={expanded ? "Collapse row" : "Expand row"}
                                 onClick={() => toggleExpanded(row.id)}
                                 className={cn(
-                                  "p-1 rounded transition-colors duration-200 ease-out hover:bg-[#eff0f2] text-[#23262c]",
-                                  expanded || showControls ? "opacity-100" : "opacity-0 pointer-events-none group-hover/row:opacity-100 group-hover/row:pointer-events-auto",
+                                  "p-1 rounded transition-colors duration-200 ease-out hover:bg-[#eff0f2] dark:hover:bg-[#2c333a] text-[#23262c] dark:text-[#b6c2cf]",
+                                  expanded || showControls
+                                    ? "opacity-100"
+                                    : "opacity-0 pointer-events-none group-hover/row:opacity-100 group-hover/row:pointer-events-auto",
                                 )}
                               >
                                 {expanded ? (
@@ -523,44 +638,53 @@ export function ScreeningResultsTable({ rows = MOCK_ROWS, title = "Screening Res
                               </button>
                               <span
                                 className={cn(
-                                  "inline-flex transition-opacity duration-200 ease-out",
+                                  "inline-flex rounded p-0.5 transition-opacity duration-200 ease-out",
+                                  rowDone && "cursor-default hover:bg-[#f3f4f6]",
                                   showControls ? "opacity-100" : "opacity-0 group-hover/row:opacity-100",
                                 )}
                               >
                                 <Checkbox
                                   className={checkboxClass}
                                   checked={selected}
-                                  onCheckedChange={(v) => toggleRowSelect(row.id, v === true)}
-                                  aria-label={`Select ${row.name}`}
+                                  disabled={rowDone}
+                                  onCheckedChange={(v) => {
+                                    if (!rowDone) toggleRowSelect(row.id, v === true);
+                                  }}
+                                  aria-label={rowDone ? `${row.name} (resolved, not selectable)` : `Select ${row.name}`}
                                 />
                               </span>
                             </div>
                           </td>
-                          <td className="px-3 py-3 whitespace-nowrap">
+                          <td className="px-3 py-3 whitespace-nowrap not-italic">
                             {row.status === "New" ? (
-                              <span className="inline-flex items-center gap-1.5 rounded-full border border-[#d6cef5] bg-[#f4f1fc] pl-1.5 pr-2.5 py-1 transition-colors duration-200 ease-out">
-                                <span className="size-2 rounded-full bg-[#523eb9]" />
-                                <span className="font-['Noto_Sans:SemiBold',sans-serif] text-[12px] text-[#523eb9]" style={{ fontVariationSettings: "'CTGR' 0, 'wdth' 100" }}>
+                              <span
+                                className={cn(
+                                  "inline-flex items-center gap-1.5 rounded-full pl-1.5 pr-2.5 py-1",
+                                  screeningNewPillSurfaceClass,
+                                )}
+                              >
+                                <span className="size-2 shrink-0 rounded-full bg-[#523eb9]" />
+                                <span className={screeningNewPillLabelClass} style={{ fontVariationSettings: "'CTGR' 0, 'wdth' 100" }}>
                                   New
                                 </span>
                               </span>
                             ) : (
-                              <span className="inline-flex items-center gap-1.5 rounded-full border border-[#c8e6c9] bg-[#f1f8f1] pl-1.5 pr-2.5 py-1 transition-colors duration-200 ease-out">
-                                <span className="size-2 rounded-full bg-[#2e7d32]" />
-                                <span className="font-['Noto_Sans:SemiBold',sans-serif] text-[12px] text-[#2e7d32]" style={{ fontVariationSettings: "'CTGR' 0, 'wdth' 100" }}>
-                                  Safe
+                              <span className="inline-flex items-center gap-1.5 rounded-full border border-[#ffcc80] bg-[#fff4e8] pl-1.5 pr-2.5 py-1 transition-colors duration-200 ease-out">
+                                <span className="size-2 rounded-full bg-[#ef6c00]" />
+                                <span className="font-['Noto_Sans:SemiBold',sans-serif] text-[12px] text-[#e65100]" style={{ fontVariationSettings: "'CTGR' 0, 'wdth' 100" }}>
+                                  Escalated
                                 </span>
                               </span>
                             )}
                           </td>
-                          <td className="px-3 py-3 font-['Noto_Sans:Regular',sans-serif] text-[14px] text-[#23262c]" style={{ fontVariationSettings: "'CTGR' 0, 'wdth' 100" }}>
+                          <td className="px-3 py-3 font-['Noto_Sans:Regular',sans-serif] text-[14px] text-[#23262c] dark:text-[#b6c2cf]" style={{ fontVariationSettings: "'CTGR' 0, 'wdth' 100" }}>
                             {row.name}
                           </td>
-                          <td className="px-3 py-3 font-['Noto_Sans:Regular',sans-serif] text-[14px] text-[#464c59] whitespace-nowrap" style={{ fontVariationSettings: "'CTGR' 0, 'wdth' 100" }}>
+                          <td className="px-3 py-3 font-['Noto_Sans:Regular',sans-serif] text-[14px] text-[#464c59] dark:text-[#9fadbc] whitespace-nowrap" style={{ fontVariationSettings: "'CTGR' 0, 'wdth' 100" }}>
                             {row.dob}
                           </td>
                           <td className="px-3 py-3 whitespace-nowrap">
-                            <span className="inline-flex items-center gap-2 font-['Noto_Sans:Regular',sans-serif] text-[14px] text-[#464c59]" style={{ fontVariationSettings: "'CTGR' 0, 'wdth' 100" }}>
+                            <span className="inline-flex items-center gap-2 font-['Noto_Sans:Regular',sans-serif] text-[14px] text-[#464c59] dark:text-[#9fadbc]" style={{ fontVariationSettings: "'CTGR' 0, 'wdth' 100" }}>
                               <span className={cn("size-2 rounded-full shrink-0", ageDotClass(row.matchAgeTone))} />
                               {row.matchAgeLabel}
                             </span>
@@ -568,7 +692,7 @@ export function ScreeningResultsTable({ rows = MOCK_ROWS, title = "Screening Res
                           <td
                             className={cn(
                               "px-3 py-3 font-['Noto_Sans:SemiBold',sans-serif] text-[14px] tabular-nums transition-colors duration-200 ease-out",
-                              scoreIsHighRisk(row.matchScore) ? "text-[#c62828]" : "text-[#23262c]",
+                              rowDone ? "text-[#6a7285] dark:text-[#8696a7]" : scoreIsHighRisk(row.matchScore) ? "text-[#c62828] dark:text-[#f48a8a]" : "text-[#23262c] dark:text-[#b6c2cf]",
                             )}
                             style={{ fontVariationSettings: "'CTGR' 0, 'wdth' 100" }}
                           >
@@ -582,7 +706,10 @@ export function ScreeningResultsTable({ rows = MOCK_ROWS, title = "Screening Res
                                 <span
                                   key={`${row.id}-t-${i}`}
                                   title={t}
-                                  className="inline-flex min-w-[22px] h-[22px] items-center justify-center rounded border border-solid px-0.5 text-[10px] font-semibold leading-none transition-transform duration-200 ease-out hover:scale-[1.03]"
+                                  className={cn(
+                                    "inline-flex min-w-[22px] h-[22px] items-center justify-center rounded border border-solid px-0.5 text-[10px] font-semibold leading-none transition-transform duration-200 ease-out",
+                                    !rowDone && "hover:scale-[1.03]",
+                                  )}
                                   style={{
                                     backgroundColor: s.bg,
                                     color: s.fg,
@@ -596,7 +723,7 @@ export function ScreeningResultsTable({ rows = MOCK_ROWS, title = "Screening Res
                             </div>
                           </td>
                         </tr>
-                        <tr className="border-b border-[#eff0f2] border-t-0">
+                        <tr className="border-b border-[#eff0f2] dark:border-[#333a42] border-t-0">
                           <td colSpan={7} className="p-0 align-top">
                             <div
                               className={cn(
@@ -607,12 +734,12 @@ export function ScreeningResultsTable({ rows = MOCK_ROWS, title = "Screening Res
                               )}
                             >
                               <div className="min-h-0 overflow-hidden">
-                                <div className="bg-[#fafafb] px-4 py-3">
+                                <div className="bg-white dark:bg-[#1d2125] px-4 py-3">
                                   <p
-                                    className="font-['Noto_Sans:Regular',sans-serif] text-[13px] text-[#464c59] m-0"
+                                    className="font-['Noto_Sans:Regular',sans-serif] text-[13px] text-[#464c59] dark:text-[#9fadbc] m-0 not-italic"
                                     style={{ fontVariationSettings: "'CTGR' 0, 'wdth' 100" }}
                                   >
-                                    Expanded match detail for <span className="font-semibold text-[#23262c]">{row.name}</span> (prototype
+                                    Expanded match detail for <span className="font-semibold text-[#23262c] dark:text-[#b6c2cf]">{row.name}</span> (prototype
                                     placeholder).
                                   </p>
                                 </div>
