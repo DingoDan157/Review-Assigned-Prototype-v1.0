@@ -40,6 +40,11 @@ import {
   type ScreeningResultRow,
 } from "./ScreeningResultsTable";
 import { cn } from "./ui/utils";
+import { SideDrawer } from "./SideDrawer";
+import {
+  MatchSimulatorDrawerContent,
+  type MatchSimulatorPresentation,
+} from "./MatchSimulatorDrawerContent";
 
 type ThemeContextValue = {
   isDark: boolean;
@@ -662,6 +667,8 @@ interface DetailPanelProps {
   screeningRows: ScreeningResultRow[];
   screeningSelectedIds: Set<string>;
   onScreeningSelectedIdsChange: Dispatch<SetStateAction<Set<string>>>;
+  activeSimulatorRowId: string | null;
+  onSimulatorRowSelect: (rowId: string | null) => void;
 }
 
 function DetailPanel({
@@ -670,6 +677,8 @@ function DetailPanel({
   screeningRows,
   screeningSelectedIds,
   onScreeningSelectedIdsChange,
+  activeSimulatorRowId,
+  onSimulatorRowSelect,
 }: DetailPanelProps) {
   const [clientExpanded, setClientExpanded] = useState(false);
   const [caseActionModal, setCaseActionModal] = useState<
@@ -911,6 +920,8 @@ function DetailPanel({
         rows={screeningRows}
         selectedIds={screeningSelectedIds}
         onSelectedIdsChange={onScreeningSelectedIdsChange}
+        activeSimulatorRowId={activeSimulatorRowId}
+        onSimulatorRowSelect={onSimulatorRowSelect}
       />
     </div>
   );
@@ -991,9 +1002,14 @@ function ReviewDrawer({ isOpen, onClose }: ReviewDrawerProps) {
   }, [isOpen]);
 
   return (
-    <div className={`bg-white dark:bg-[#22272b] shrink-0 flex flex-col transition-all duration-300 ease-in-out overflow-hidden relative ${isOpen ? 'w-[480px] opacity-100 border-l border-[#cfd2d9] dark:border-[#38414a]' : 'w-0 opacity-0'}`}>
-      {isOpen && (
-        <>
+    <SideDrawer
+      isOpen={isOpen}
+      onClose={onClose}
+      widthStorageKey="review-assigned-review-drawer-width"
+      defaultWidth={480}
+      className="self-stretch"
+    >
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <div className="bg-white dark:bg-[#22272b] relative shrink-0 w-full">
           <div className="flex flex-row items-center overflow-clip rounded-[inherit] size-full">
             <div className="content-stretch flex items-center px-[20px] py-[16px] relative size-full">
@@ -1173,8 +1189,7 @@ function ReviewDrawer({ isOpen, onClose }: ReviewDrawerProps) {
             </div>
           </div>
         </div>
-        </>
-      )}
+      </div>
       <Dialog
         open={isOpen && matchHistoryOpen}
         onOpenChange={setMatchHistoryOpen}
@@ -1191,7 +1206,7 @@ function ReviewDrawer({ isOpen, onClose }: ReviewDrawerProps) {
           <div className="min-h-[200px] px-6 py-6" />
         </DialogContent>
       </Dialog>
-    </div>
+    </SideDrawer>
   );
 }
 
@@ -1225,12 +1240,40 @@ export function ResponsiveReviewInterface() {
   const [sidebarPeek, setSidebarPeek] = useState(false);
   const [selectedCaseIndex, setSelectedCaseIndex] = useState(0);
   const [isReviewDrawerOpen, setIsReviewDrawerOpen] = useState(false);
+  const [simulatorRowId, setSimulatorRowId] = useState<string | null>(null);
+  const [simulatorPresentation, setSimulatorPresentation] =
+    useState<MatchSimulatorPresentation>("drawer");
   const [screeningSelectedIds, setScreeningSelectedIds] = useState<Set<string>>(() => new Set());
 
   const screeningRows = useMemo(() => getScreeningRowsForCase(selectedCaseIndex), [selectedCaseIndex]);
 
+  const simulatorRow = useMemo(
+    () => (simulatorRowId ? screeningRows.find((r) => r.id === simulatorRowId) ?? null : null),
+    [screeningRows, simulatorRowId],
+  );
+
+  const closeSimulator = useCallback(() => {
+    setSimulatorRowId(null);
+    setSimulatorPresentation("drawer");
+  }, []);
+
+  const handleSimulatorRowSelect = useCallback((rowId: string | null) => {
+    setSimulatorRowId(rowId);
+    if (rowId) {
+      setSimulatorPresentation("drawer");
+      setIsReviewDrawerOpen(false);
+    }
+  }, []);
+
+  const handleShowReview = useCallback(() => {
+    setSimulatorRowId(null);
+    setIsReviewDrawerOpen((open) => !open);
+  }, []);
+
   useEffect(() => {
     setScreeningSelectedIds(new Set());
+    setSimulatorRowId(null);
+    setSimulatorPresentation("drawer");
   }, [selectedCaseIndex]);
 
   const sidebarPinnedRef = useRef(sidebarPinned);
@@ -1320,16 +1363,55 @@ export function ResponsiveReviewInterface() {
                 screeningRows={screeningRows}
                 screeningSelectedIds={screeningSelectedIds}
                 onScreeningSelectedIdsChange={setScreeningSelectedIds}
+                activeSimulatorRowId={simulatorRowId}
+                onSimulatorRowSelect={handleSimulatorRowSelect}
               />
             </div>
             <TaskBar
-              onShowReview={() => setIsReviewDrawerOpen(!isReviewDrawerOpen)}
+              onShowReview={handleShowReview}
               isReviewOpen={isReviewDrawerOpen}
               screeningSelectionCount={screeningSelectedIds.size}
               onDeselectAllScreening={() => setScreeningSelectedIds(new Set())}
             />
           </div>
           <ReviewDrawer isOpen={isReviewDrawerOpen} onClose={() => setIsReviewDrawerOpen(false)} />
+          <SideDrawer
+            isOpen={simulatorRow !== null && simulatorPresentation === "drawer"}
+            onClose={closeSimulator}
+            widthStorageKey="review-assigned-match-simulator-drawer-width"
+            defaultWidth={420}
+            className="self-stretch"
+          >
+            {simulatorRow && simulatorPresentation === "drawer" ? (
+              <MatchSimulatorDrawerContent
+                key={simulatorRow.id}
+                row={simulatorRow}
+                onClose={closeSimulator}
+                presentation="drawer"
+                onSwitchToModal={() => setSimulatorPresentation("modal")}
+              />
+            ) : null}
+          </SideDrawer>
+
+          <Dialog
+            open={simulatorRow !== null && simulatorPresentation === "modal"}
+            onOpenChange={(open) => {
+              if (!open) closeSimulator();
+            }}
+          >
+            <DialogContent className="flex h-[min(90vh,880px)] w-[min(calc(100vw-2rem),1200px)] max-w-none flex-col gap-0 overflow-hidden rounded-[4px] border border-[#cfd2d9] bg-white p-0 dark:border-[#38414a] dark:bg-[#22272b] sm:max-w-none [&>button.absolute]:hidden">
+              <DialogTitle className="sr-only">Match Simulator</DialogTitle>
+              {simulatorRow && simulatorPresentation === "modal" ? (
+                <MatchSimulatorDrawerContent
+                  key={simulatorRow.id}
+                  row={simulatorRow}
+                  onClose={closeSimulator}
+                  presentation="modal"
+                  onSwitchToDrawer={() => setSimulatorPresentation("drawer")}
+                />
+              ) : null}
+            </DialogContent>
+          </Dialog>
         </div>
       </div>
     </div>

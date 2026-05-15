@@ -2,16 +2,21 @@ import {
   useMemo,
   useState,
   useCallback,
-  Fragment,
   useEffect,
-  useId,
   useRef,
   type Dispatch,
   type SetStateAction,
 } from "react";
-import { ArrowDown, ArrowDownUp, ArrowUp, ChevronDown, ChevronRight, Eye, EyeOff } from "lucide-react";
-import { Checkbox } from "./ui/checkbox";
+import { ChevronDown, Eye, EyeOff, FlaskConical } from "lucide-react";
 import { cn } from "./ui/utils";
+import {
+  ExpandableFinScanTable,
+  durationAccordion,
+  easeAccordion,
+  type FinScanTableColumn,
+} from "./ExpandableFinScanTable";
+
+export { easeAccordion, durationAccordion } from "./ExpandableFinScanTable";
 
 export type ScreeningRowStatus = "New" | "Escalated";
 
@@ -111,11 +116,11 @@ const MATCH_KEY_ITEMS: { code: string; label: string; bg: string; fg: string; bo
 type SortKey = "name" | "dob" | "matchAge" | "matchScore" | "matchString" | "status";
 type SortDir = "asc" | "desc";
 
-function scoreIsHighRisk(score: number): boolean {
+export function scoreIsHighRisk(score: number): boolean {
   return score >= 85;
 }
 
-function tileSoftStyle(code: string): { bg: string; fg: string; border: string } {
+export function tileSoftStyle(code: string): { bg: string; fg: string; border: string } {
   const upper = code.toUpperCase();
   if (upper === "E") return { bg: "#fdeaea", fg: "#9e2a2a", border: "rgba(194,40,40,0.12)" };
   if (upper === "N") return { bg: "#e8f4ea", fg: "#2d6a3e", border: "rgba(46,125,50,0.12)" };
@@ -123,6 +128,31 @@ function tileSoftStyle(code: string): { bg: string; fg: string; border: string }
   if (upper === "C2") return { bg: "#fff9e6", fg: "#9a6b00", border: "rgba(249,168,37,0.15)" };
   if (upper === "B") return { bg: "#f0f1f3", fg: "#5c6370", border: "rgba(106,114,130,0.15)" };
   return { bg: "#f0f1f3", fg: "#5c6370", border: "rgba(106,114,130,0.15)" };
+}
+
+/** Match-string tiles — same markup as the screening results table column. */
+export function MatchStringTiles({ tiles, className }: { tiles: string[]; className?: string }) {
+  return (
+    <div className={cn("flex flex-wrap items-center gap-1", className)}>
+      {tiles.map((t, i) => {
+        const s = tileSoftStyle(t);
+        return (
+          <span
+            key={`${t}-${i}`}
+            title={t}
+            className="inline-flex h-[22px] min-w-[22px] items-center justify-center rounded border border-solid px-0.5 text-[10px] font-semibold leading-none"
+            style={{
+              backgroundColor: s.bg,
+              color: s.fg,
+              borderColor: s.border,
+            }}
+          >
+            {t}
+          </span>
+        );
+      })}
+    </div>
+  );
 }
 
 function ageDotClass(tone: ScreeningResultRow["matchAgeTone"]): string {
@@ -141,12 +171,303 @@ function parseAgeForSort(label: string): number {
   return n * mult;
 }
 
-const checkboxClass =
-  "h-4 w-4 shrink-0 rounded-[3px] border-[#523eb9] border bg-white dark:bg-[#22272b] text-white transition-all duration-200 ease-out data-[state=checked]:bg-[#523eb9] data-[state=checked]:border-[#523eb9] data-[state=indeterminate]:bg-[#523eb9] data-[state=indeterminate]:border-[#523eb9] focus-visible:ring-2 focus-visible:ring-[#523eb9]/35 [&_svg]:size-3 disabled:cursor-default disabled:opacity-50 disabled:border-[#cfd2d9] dark:disabled:border-[#454c59] disabled:data-[state=checked]:bg-[#d4d6db] disabled:data-[state=checked]:border-[#cfd2d9] disabled:data-[state=indeterminate]:bg-[#d4d6db] disabled:data-[state=indeterminate]:border-[#cfd2d9]";
+const notoVar = { fontVariationSettings: "'CTGR' 0, 'wdth' 100" } as const;
 
-/** Smooth open/close for accordions and expandable rows (Material-style deceleration). */
-const easeAccordion = "[transition-timing-function:cubic-bezier(0.32,0.72,0,1)]";
-const durationAccordion = "duration-[420ms]";
+export function matchAttributeLabel(code: string): string {
+  const upper = code.toUpperCase();
+  if (upper === "E") return "EQUAL";
+  if (upper === "C1" || upper === "C") return "VERY CLOSE";
+  if (upper === "C2") return "CLOSE";
+  if (upper === "B") return "BLANK";
+  if (upper === "N") return "NOT EQUAL";
+  return upper;
+}
+
+export type SimulatorRunResultRow = {
+  id: string;
+  tile: string;
+  matchField: string;
+  clientData: string;
+  listData: string;
+};
+
+export function buildSimulatorRunRows(row: ScreeningResultRow): SimulatorRunResultRow[] {
+  const sampleClient = ["SMITH", "JOHN", "", "", "", ""];
+  const sampleList = ["SMITHY", "JOHN", "", "", "", ""];
+  return row.matchTiles.map((tile, i) => ({
+    id: `${row.id}-run-${i}`,
+    tile,
+    matchField: `Significant Name ${i + 1}`,
+    clientData: sampleClient[i] ?? "",
+    listData: sampleList[i] ?? "",
+  }));
+}
+
+const RUN_RESULTS_COLUMNS: FinScanTableColumn<SimulatorRunResultRow>[] = [
+  {
+    key: "matchField",
+    label: "Match Field",
+    cellClassName: "text-[#464c59] dark:text-[#9fadbc] whitespace-nowrap",
+    render: (r) => r.matchField,
+  },
+  {
+    key: "clientData",
+    label: "Client Data",
+    cellClassName: "text-[#464c59] dark:text-[#9fadbc]",
+    render: (r) => r.clientData || "\u00a0",
+  },
+  {
+    key: "listData",
+    label: "List Data",
+    cellClassName: "text-[#464c59] dark:text-[#9fadbc]",
+    render: (r) => r.listData || "\u00a0",
+  },
+  {
+    key: "matchAttribute",
+    label: "Match Attribute",
+    cellClassName: "min-w-[120px]",
+    render: (r) => {
+      const soft = tileSoftStyle(r.tile);
+      return (
+        <span
+          className="flex w-full min-w-0 items-center justify-center rounded-[4px] border border-solid px-1 py-1.5 font-['Noto_Sans:Bold',sans-serif] text-[10px] font-bold leading-none tracking-wide"
+          style={{
+            backgroundColor: soft.bg,
+            color: soft.fg,
+            borderColor: soft.border,
+          }}
+        >
+          {matchAttributeLabel(r.tile)}
+        </span>
+      );
+    },
+  },
+];
+
+export type NamePatternTableRow = {
+  id: string;
+  rowLabel: string;
+  cells: string[];
+  attributeTiles: string[];
+  kind: "client" | "list";
+};
+
+function compactMatchTiles(tiles: string[], tight = false) {
+  return (
+    <div className={cn("flex flex-wrap items-center justify-center", tight ? "gap-0.5" : "gap-1.5")}>
+      {tiles.map((t, i) => {
+        const s = tileSoftStyle(t);
+        return (
+          <span
+            key={`${t}-${i}`}
+            title={t}
+            className={cn(
+              "inline-flex items-center justify-center rounded border border-solid font-semibold leading-none",
+              tight ? "size-3.5 text-[9px]" : "size-4 text-[10px]",
+            )}
+            style={{
+              backgroundColor: s.bg,
+              color: s.fg,
+              borderColor: s.border,
+            }}
+          >
+            {t}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+function padNamePatternCells(arr: string[], len: number): string[] {
+  const out = [...arr];
+  while (out.length < len) out.push("");
+  return out.slice(0, len);
+}
+
+export function buildNamePatternTableRows(row: ScreeningResultRow): NamePatternTableRow[] {
+  const colCount = Math.max(3, row.matchTiles.length);
+  const clientCells = padNamePatternCells(["SMITH", "JOHN", "", "", ""], colCount);
+  const listCells = padNamePatternCells(["SMITH", "JOHN", "JAMES", "", ""], colCount);
+  const clientAttrs = padNamePatternCells(row.matchTiles.map(String), colCount);
+  const listAttrs = padNamePatternCells(["E", "B", "C2", "C1", "N"], colCount);
+
+  return [
+    {
+      id: `${row.id}-np-client`,
+      rowLabel: "Client Name",
+      cells: clientCells,
+      attributeTiles: clientAttrs,
+      kind: "client",
+    },
+    {
+      id: `${row.id}-np-list`,
+      rowLabel: "List Name",
+      cells: listCells,
+      attributeTiles: listAttrs,
+      kind: "list",
+    },
+  ];
+}
+
+export type NamePatternTableSize = "compact" | "comfortable";
+
+function buildNamePatternColumns(
+  colCount: number,
+  size: NamePatternTableSize = "compact",
+): FinScanTableColumn<NamePatternTableRow>[] {
+  const comfortable = size === "comfortable";
+  const cols: FinScanTableColumn<NamePatternTableRow>[] = [
+    {
+      key: "rowLabel",
+      label: "",
+      headerClassName: comfortable ? "w-[10%]" : "w-[76px] max-w-[76px]",
+      cellClassName: cn(
+        "font-medium text-[#464c59] dark:text-[#9fadbc] whitespace-nowrap",
+        comfortable ? "text-[13px]" : "text-[11px]",
+      ),
+      render: (r) => r.rowLabel,
+    },
+  ];
+
+  for (let i = 0; i < colCount; i++) {
+    const index = i;
+    cols.push({
+      key: `significant-name-${index + 1}`,
+      label: comfortable ? `Significant Name ${index + 1}` : `Name ${index + 1}`,
+      headerClassName: comfortable
+        ? "text-center"
+        : "text-center min-w-[48px] max-w-[64px]",
+      cellClassName: cn(
+        "text-center text-[#464c59] dark:text-[#9fadbc]",
+        comfortable ? "text-[13px]" : "text-[11px]",
+      ),
+      render: (r) => {
+        const cell = r.cells[index] ?? "";
+        const highlight = r.kind === "list" && cell !== "";
+        return (
+          <span
+            className={cn(
+              "inline-flex w-full items-center justify-center",
+              comfortable ? "min-h-[28px] px-1" : "min-h-[20px] px-0.5",
+              highlight && "bg-[#c9e5bd] dark:bg-[#3d5a35]",
+            )}
+          >
+            {cell || "\u00a0"}
+          </span>
+        );
+      },
+    });
+  }
+
+  cols.push({
+    key: "matchAttributes",
+    label: comfortable ? "Match Attributes" : "Match Attr.",
+    headerClassName: comfortable ? "w-[14%] text-center" : "text-center min-w-[72px]",
+    cellClassName: "text-center",
+    render: (r) => compactMatchTiles(r.attributeTiles, !comfortable),
+  });
+
+  return cols;
+}
+
+export type ReferenceDataFieldRow = {
+  id: string;
+  label: string;
+  value: string;
+};
+
+const REFERENCE_DATA_FIELD_COLUMNS: FinScanTableColumn<ReferenceDataFieldRow>[] = [
+  {
+    key: "label",
+    label: "Label",
+    headerClassName: "w-[38%]",
+    cellClassName:
+      "font-['Noto_Sans:SemiBold',sans-serif] font-semibold text-[#464c59] dark:text-[#9fadbc]",
+    render: (r) => r.label,
+  },
+  {
+    key: "field",
+    label: "Field",
+    cellClassName: "text-[#23262c] dark:text-[#b6c2cf] break-words",
+    render: (r) => r.value,
+  },
+];
+
+/** Match Simulator Reference Data — label / field rows (no expand). */
+export function SimulatorReferenceDataTable({
+  rows,
+  caption,
+}: {
+  rows: ReferenceDataFieldRow[];
+  caption: string;
+}) {
+  return (
+    <ExpandableFinScanTable
+      rows={rows}
+      columns={REFERENCE_DATA_FIELD_COLUMNS}
+      caption={caption}
+      expandable={false}
+      density="compact"
+      minWidth="w-full"
+      tableClassName="table-fixed"
+      scrollX={false}
+      className="overflow-hidden rounded-[4px] border border-[#e4e6ea] bg-white dark:border-[#38414a] dark:bg-[#22272b]"
+    />
+  );
+}
+
+/** Match Simulator “Name Patterns” — static table (compact in drawer, comfortable in modal). */
+export function SimulatorNamePatternsTable({
+  rows,
+  size = "compact",
+}: {
+  rows: NamePatternTableRow[];
+  size?: NamePatternTableSize;
+}) {
+  const colCount = rows[0]?.cells.length ?? 3;
+  const columns = useMemo(() => buildNamePatternColumns(colCount, size), [colCount, size]);
+  const comfortable = size === "comfortable";
+
+  return (
+    <ExpandableFinScanTable
+      rows={rows}
+      columns={columns}
+      caption="Match simulator name patterns"
+      expandable={false}
+      density={comfortable ? "default" : "compact"}
+      minWidth="w-full"
+      tableClassName={comfortable ? "table-fixed" : undefined}
+      scrollX={!comfortable}
+      className="rounded-[4px] border border-[#e4e6ea] dark:border-[#38414a]"
+      getRowClassName={(r) =>
+        r.kind === "list" ? "bg-[#fafafb] dark:bg-[#1d2125]" : undefined
+      }
+    />
+  );
+}
+
+/** Match Simulator “Run Results” — shared ExpandableFinScanTable (no sort, no striping). */
+export function SimulatorRunResultsTable({ rows }: { rows: SimulatorRunResultRow[] }) {
+  return (
+    <ExpandableFinScanTable
+      rows={rows}
+      columns={RUN_RESULTS_COLUMNS}
+      caption="Match simulator run results"
+      minWidth="min-w-[520px]"
+      className="border border-[#e4e6ea] dark:border-[#38414a]"
+      renderExpandedContent={(r) => (
+        <p
+          className="m-0 font-['Noto_Sans:Regular',sans-serif] text-[13px] not-italic text-[#464c59] dark:text-[#9fadbc]"
+          style={notoVar}
+        >
+          Attribute detail for {r.matchField} (prototype placeholder).
+        </p>
+      )}
+    />
+  );
+}
+
 
 interface ScreeningResultsTableProps {
   rows?: ScreeningResultRow[];
@@ -156,6 +477,9 @@ interface ScreeningResultsTableProps {
   /** When both are passed, row selection is controlled by the parent (e.g. task bar). */
   selectedIds?: Set<string>;
   onSelectedIdsChange?: Dispatch<SetStateAction<Set<string>>>;
+  /** Row id with Match Simulator open in the page-level right panel. */
+  activeSimulatorRowId?: string | null;
+  onSimulatorRowSelect?: (rowId: string | null) => void;
 }
 
 export function ScreeningResultsTable({
@@ -164,8 +488,9 @@ export function ScreeningResultsTable({
   className,
   selectedIds: selectedIdsProp,
   onSelectedIdsChange,
+  activeSimulatorRowId = null,
+  onSimulatorRowSelect,
 }: ScreeningResultsTableProps) {
-  const tableCaptionId = useId();
   /** Empty set = no filter (show all). Otherwise rows must match one of the selected statuses. */
   const [statusFilters, setStatusFilters] = useState<Set<ScreeningRowStatus>>(() => new Set());
   const [sortKey, setSortKey] = useState<SortKey | null>(null);
@@ -285,9 +610,6 @@ export function ScreeningResultsTable({
 
   const selectionMode = selectedIds.size > 0;
 
-  const allVisibleExpanded =
-    sortedRows.length > 0 && sortedRows.every((r) => expandedIds.has(r.id));
-
   const actionableRows = useMemo(() => sortedRows.filter((r) => r.status === "New"), [sortedRows]);
 
   const allVisibleSelected =
@@ -301,23 +623,6 @@ export function ScreeningResultsTable({
       return;
     }
     setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-  };
-
-  const toggleExpanded = useCallback((id: string) => {
-    setExpandedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
-
-  const toggleExpandAll = () => {
-    if (allVisibleExpanded) {
-      setExpandedIds(new Set());
-      return;
-    }
-    setExpandedIds(new Set(sortedRows.map((r) => r.id)));
   };
 
   const onHeaderSelectAllChange = (value: boolean | "indeterminate") => {
@@ -342,6 +647,118 @@ export function ScreeningResultsTable({
 
   const headerCheckboxState: boolean | "indeterminate" =
     someVisibleSelected && !allVisibleSelected ? "indeterminate" : allVisibleSelected;
+
+  const screeningColumns: FinScanTableColumn<ScreeningResultRow>[] = useMemo(
+    () => [
+      {
+        key: "status",
+        label: "Status",
+        sortKey: "status",
+        cellClassName: "whitespace-nowrap",
+        render: (row) =>
+          row.status === "New" ? (
+            <span className={cn("inline-flex items-center gap-1.5 rounded-full pl-1.5 pr-2.5 py-1", screeningNewPillSurfaceClass)}>
+              <span className="size-2 shrink-0 rounded-full bg-[#523eb9]" />
+              <span className={screeningNewPillLabelClass} style={notoVar}>
+                New
+              </span>
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-[#ffcc80] bg-[#fff4e8] pl-1.5 pr-2.5 py-1 transition-colors duration-200 ease-out">
+              <span className="size-2 rounded-full bg-[#ef6c00]" />
+              <span
+                className="font-['Noto_Sans:SemiBold',sans-serif] text-[12px] text-[#e65100]"
+                style={notoVar}
+              >
+                Escalated
+              </span>
+            </span>
+          ),
+      },
+      {
+        key: "name",
+        label: "Name",
+        sortKey: "name",
+        cellClassName: "text-[#23262c] dark:text-[#b6c2cf]",
+        render: (row) => row.name,
+      },
+      {
+        key: "dob",
+        label: "Date of Birth",
+        sortKey: "dob",
+        cellClassName: "text-[#464c59] dark:text-[#9fadbc] whitespace-nowrap",
+        render: (row) => row.dob,
+      },
+      {
+        key: "matchAge",
+        label: "Match Age",
+        sortKey: "matchAge",
+        cellClassName: "whitespace-nowrap",
+        render: (row) => (
+          <span className="inline-flex items-center gap-2 text-[#464c59] dark:text-[#9fadbc]">
+            <span className={cn("size-2 shrink-0 rounded-full", ageDotClass(row.matchAgeTone))} />
+            {row.matchAgeLabel}
+          </span>
+        ),
+      },
+      {
+        key: "matchScore",
+        label: "Match Score",
+        sortKey: "matchScore",
+        cellClassName: "font-['Noto_Sans:SemiBold',sans-serif] font-semibold tabular-nums",
+        render: (row) => (
+          <span
+            className={cn(
+              row.status === "Escalated"
+                ? "text-[#6a7285] dark:text-[#8696a7]"
+                : scoreIsHighRisk(row.matchScore)
+                  ? "text-[#c62828] dark:text-[#f48a8a]"
+                  : "text-[#23262c] dark:text-[#b6c2cf]",
+            )}
+          >
+            {row.matchScore}
+          </span>
+        ),
+      },
+      {
+        key: "matchString",
+        label: "Match String",
+        sortKey: "matchString",
+        render: (row) => (
+          <MatchStringTiles
+            tiles={row.matchTiles}
+            className={cn(
+              row.status !== "Escalated" &&
+                "[&_span]:transition-transform [&_span]:duration-200 [&_span]:ease-out [&_span:hover]:scale-[1.03]",
+            )}
+          />
+        ),
+      },
+    ],
+    [],
+  );
+
+  const screeningEmptyState = (
+    <>
+      <p className="m-0 mb-3 font-['Noto_Sans:Regular',sans-serif] text-[14px] text-[#464c59] dark:text-[#9fadbc]" style={notoVar}>
+        {rows.length === 0
+          ? "No screening results to display."
+          : statusFilters.size > 0
+            ? "No results match the current filter."
+            : "No results to display."}
+      </p>
+      {statusFilters.size > 0 && rows.length > 0 ? (
+        <button
+          type="button"
+          className="rounded px-1 font-['Noto_Sans:SemiBold',sans-serif] text-[14px] text-[#523eb9] underline underline-offset-2 decoration-[#523eb9]/40 transition-colors duration-200 ease-out hover:decoration-[#523eb9] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#523eb9]/35"
+          style={notoVar}
+          onClick={() => setStatusFilters(new Set())}
+        >
+          Clear filter
+        </button>
+      ) : null}
+    </>
+  );
 
   return (
     <div
@@ -496,263 +913,67 @@ export function ScreeningResultsTable({
                 </div>
               </div>
             </div>
-            <div className="min-h-0 flex-1 overflow-y-auto overflow-x-auto scroll-smooth">
-              <table
-                className="w-full text-left border-collapse min-w-[720px]"
-                aria-labelledby={tableCaptionId}
-              >
-                <caption id={tableCaptionId} className="sr-only">
-                  {title}, {sortedRows.length} {sortedRows.length === 1 ? "row" : "rows"}
-                  {statusFilters.size > 0 ? `, filtered by ${[...statusFilters].sort((a, b) => a.localeCompare(b)).join(", ")}` : ""}
-                </caption>
-                <thead className="sticky top-0 z-[1] bg-[#fafafb] dark:bg-[#1d2125] border-b border-[#cfd2d9] dark:border-[#38414a] shadow-[0_1px_0_rgba(207,210,217,0.6)] dark:shadow-[0_1px_0_rgba(0,0,0,0.45)]">
-                  <tr className="h-8">
-                    <th scope="col" className="w-12 px-2 py-1 align-middle">
-                      <div className="flex items-center gap-0.5">
-                        <button
-                          type="button"
-                          className="p-1 rounded transition-colors duration-200 ease-out hover:bg-[#eff0f2] dark:hover:bg-[#2c333a] text-[#23262c] dark:text-[#b6c2cf] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#523eb9]/35 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-[#22272b]"
-                          aria-label={allVisibleExpanded ? "Collapse all rows" : "Expand all rows"}
-                          onClick={toggleExpandAll}
-                        >
-                          {allVisibleExpanded ? (
-                            <ChevronDown className={cn("size-[18px]", durationAccordion, easeAccordion, "transition-transform")} />
-                          ) : (
-                            <ChevronRight className={cn("size-[18px]", durationAccordion, easeAccordion, "transition-transform")} />
-                          )}
-                        </button>
-                        <Checkbox
-                          className={checkboxClass}
-                          checked={headerCheckboxState}
-                          disabled={actionableRows.length === 0}
-                          onCheckedChange={onHeaderSelectAllChange}
-                          aria-label={
-                            actionableRows.length === 0
-                              ? "No selectable results"
-                              : allVisibleSelected
-                                ? "Deselect all results"
-                                : "Select all results"
-                          }
-                        />
-                      </div>
-                      <span className="sr-only">Expand and select</span>
-                    </th>
-                    {(
-                      [
-                        ["status", "Status"],
-                        ["name", "Name"],
-                        ["dob", "Date of Birth"],
-                        ["matchAge", "Match Age"],
-                        ["matchScore", "Match Score"],
-                        ["matchString", "Match String"],
-                      ] as const
-                    ).map(([key, label]) => (
-                      <th key={key} scope="col" className="px-3 py-1 align-middle" aria-sort={sortKey === key ? (sortDir === "asc" ? "ascending" : "descending") : "none"}>
-                        <button
-                          type="button"
-                          onClick={() => toggleSort(key)}
-                          className="inline-flex items-center gap-1.5 rounded px-1 py-0.5 -mx-1 transition-colors duration-200 ease-out hover:bg-[#eff0f2] dark:hover:bg-[#2c333a] text-[#23262c] dark:text-[#b6c2cf] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#523eb9]/35 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-[#22272b]"
-                        >
-                          <span
-                            className="font-['Noto_Sans:Bold',sans-serif] font-bold text-[12px] uppercase tracking-wide text-[#6a7285] dark:text-[#8696a7]"
-                            style={{ fontVariationSettings: "'CTGR' 0, 'wdth' 100" }}
-                          >
-                            {label}
-                          </span>
-                          {sortKey === key ? (
-                            sortDir === "asc" ? (
-                              <ArrowUp className="size-4 shrink-0 text-[#523eb9] transition-transform duration-200 ease-out" strokeWidth={2} />
-                            ) : (
-                              <ArrowDown className="size-4 shrink-0 text-[#523eb9] transition-transform duration-200 ease-out" strokeWidth={2} />
-                            )
-                          ) : (
-                            <ArrowDownUp className="size-4 shrink-0 text-[#949baa] transition-colors duration-200 ease-out" strokeWidth={2} />
-                          )}
-                        </button>
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {sortedRows.length === 0 ? (
-                    <tr>
-                      <td colSpan={7} className="px-6 py-16 text-center">
-                        <p
-                          className="font-['Noto_Sans:Regular',sans-serif] text-[14px] text-[#464c59] dark:text-[#9fadbc] m-0 mb-3"
-                          style={{ fontVariationSettings: "'CTGR' 0, 'wdth' 100" }}
-                        >
-                          {rows.length === 0
-                            ? "No screening results to display."
-                            : statusFilters.size > 0
-                              ? "No results match the current filter."
-                              : "No results to display."}
-                        </p>
-                        {statusFilters.size > 0 && rows.length > 0 && (
-                          <button
-                            type="button"
-                            className="font-['Noto_Sans:SemiBold',sans-serif] text-[14px] text-[#523eb9] underline underline-offset-2 decoration-[#523eb9]/40 hover:decoration-[#523eb9] transition-colors duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#523eb9]/35 rounded px-1"
-                            style={{ fontVariationSettings: "'CTGR' 0, 'wdth' 100" }}
-                            onClick={() => setStatusFilters(new Set())}
-                          >
-                            Clear filter
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ) : null}
-                  {sortedRows.map((row) => {
-                    const expanded = expandedIds.has(row.id);
-                    const selected = selectedIds.has(row.id);
-                    const rowDone = row.status === "Escalated";
-                    const showControls = selectionMode || expanded;
-                    return (
-                      <Fragment key={row.id}>
-                        <tr
-                          aria-selected={selected && !rowDone}
-                          className={cn(
-                            "group/row border-b border-[#eff0f2] dark:border-[#333a42] transition-[background-color,box-shadow] duration-200 ease-out",
-                            rowDone && "bg-[#f3f4f6] dark:bg-[#2c333a] italic text-[#6a7285] dark:text-[#8696a7]",
-                            !rowDone && "bg-white dark:bg-[#22272b] hover:bg-[#f3f4f6] dark:hover:bg-[#2c333a] hover:shadow-[inset_2px_0_0_0_rgba(82,62,185,0.2)]",
-                            selected && !rowDone && "bg-[#f4f1fc]/60 dark:bg-[#38414a]/45",
-                          )}
-                        >
-                          <td className="w-12 px-2 py-3 align-middle not-italic">
-                            <div className="flex items-center gap-0.5">
-                              <button
-                                type="button"
-                                aria-expanded={expanded}
-                                aria-label={expanded ? "Collapse row" : "Expand row"}
-                                onClick={() => toggleExpanded(row.id)}
-                                className={cn(
-                                  "p-1 rounded transition-colors duration-200 ease-out hover:bg-[#eff0f2] dark:hover:bg-[#2c333a] text-[#23262c] dark:text-[#b6c2cf]",
-                                  expanded || showControls
-                                    ? "opacity-100"
-                                    : "opacity-0 pointer-events-none group-hover/row:opacity-100 group-hover/row:pointer-events-auto",
-                                )}
-                              >
-                                {expanded ? (
-                                  <ChevronDown className={cn("size-[18px]", durationAccordion, easeAccordion, "transition-transform")} />
-                                ) : (
-                                  <ChevronRight className={cn("size-[18px]", durationAccordion, easeAccordion, "transition-transform")} />
-                                )}
-                              </button>
-                              <span
-                                className={cn(
-                                  "inline-flex rounded p-0.5 transition-opacity duration-200 ease-out",
-                                  rowDone && "cursor-default hover:bg-[#f3f4f6]",
-                                  showControls ? "opacity-100" : "opacity-0 group-hover/row:opacity-100",
-                                )}
-                              >
-                                <Checkbox
-                                  className={checkboxClass}
-                                  checked={selected}
-                                  disabled={rowDone}
-                                  onCheckedChange={(v) => {
-                                    if (!rowDone) toggleRowSelect(row.id, v === true);
-                                  }}
-                                  aria-label={rowDone ? `${row.name} (resolved, not selectable)` : `Select ${row.name}`}
-                                />
-                              </span>
-                            </div>
-                          </td>
-                          <td className="px-3 py-3 whitespace-nowrap not-italic">
-                            {row.status === "New" ? (
-                              <span
-                                className={cn(
-                                  "inline-flex items-center gap-1.5 rounded-full pl-1.5 pr-2.5 py-1",
-                                  screeningNewPillSurfaceClass,
-                                )}
-                              >
-                                <span className="size-2 shrink-0 rounded-full bg-[#523eb9]" />
-                                <span className={screeningNewPillLabelClass} style={{ fontVariationSettings: "'CTGR' 0, 'wdth' 100" }}>
-                                  New
-                                </span>
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center gap-1.5 rounded-full border border-[#ffcc80] bg-[#fff4e8] pl-1.5 pr-2.5 py-1 transition-colors duration-200 ease-out">
-                                <span className="size-2 rounded-full bg-[#ef6c00]" />
-                                <span className="font-['Noto_Sans:SemiBold',sans-serif] text-[12px] text-[#e65100]" style={{ fontVariationSettings: "'CTGR' 0, 'wdth' 100" }}>
-                                  Escalated
-                                </span>
-                              </span>
-                            )}
-                          </td>
-                          <td className="px-3 py-3 font-['Noto_Sans:Regular',sans-serif] text-[14px] text-[#23262c] dark:text-[#b6c2cf]" style={{ fontVariationSettings: "'CTGR' 0, 'wdth' 100" }}>
-                            {row.name}
-                          </td>
-                          <td className="px-3 py-3 font-['Noto_Sans:Regular',sans-serif] text-[14px] text-[#464c59] dark:text-[#9fadbc] whitespace-nowrap" style={{ fontVariationSettings: "'CTGR' 0, 'wdth' 100" }}>
-                            {row.dob}
-                          </td>
-                          <td className="px-3 py-3 whitespace-nowrap">
-                            <span className="inline-flex items-center gap-2 font-['Noto_Sans:Regular',sans-serif] text-[14px] text-[#464c59] dark:text-[#9fadbc]" style={{ fontVariationSettings: "'CTGR' 0, 'wdth' 100" }}>
-                              <span className={cn("size-2 rounded-full shrink-0", ageDotClass(row.matchAgeTone))} />
-                              {row.matchAgeLabel}
-                            </span>
-                          </td>
-                          <td
-                            className={cn(
-                              "px-3 py-3 font-['Noto_Sans:SemiBold',sans-serif] text-[14px] tabular-nums transition-colors duration-200 ease-out",
-                              rowDone ? "text-[#6a7285] dark:text-[#8696a7]" : scoreIsHighRisk(row.matchScore) ? "text-[#c62828] dark:text-[#f48a8a]" : "text-[#23262c] dark:text-[#b6c2cf]",
-                            )}
-                            style={{ fontVariationSettings: "'CTGR' 0, 'wdth' 100" }}
-                          >
-                            {row.matchScore}
-                          </td>
-                          <td className="px-3 py-3">
-                            <div className="flex items-center gap-1">
-                              {row.matchTiles.map((t, i) => {
-                                const s = tileSoftStyle(t);
-                                return (
-                                <span
-                                  key={`${row.id}-t-${i}`}
-                                  title={t}
-                                  className={cn(
-                                    "inline-flex min-w-[22px] h-[22px] items-center justify-center rounded border border-solid px-0.5 text-[10px] font-semibold leading-none transition-transform duration-200 ease-out",
-                                    !rowDone && "hover:scale-[1.03]",
-                                  )}
-                                  style={{
-                                    backgroundColor: s.bg,
-                                    color: s.fg,
-                                    borderColor: s.border,
-                                  }}
-                                >
-                                  {t}
-                                </span>
-                                );
-                              })}
-                            </div>
-                          </td>
-                        </tr>
-                        <tr className="border-b border-[#eff0f2] dark:border-[#333a42] border-t-0">
-                          <td colSpan={7} className="p-0 align-top">
-                            <div
-                              className={cn(
-                                "grid overflow-hidden transition-[grid-template-rows]",
-                                durationAccordion,
-                                easeAccordion,
-                                expanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
-                              )}
-                            >
-                              <div className="min-h-0 overflow-hidden">
-                                <div className="bg-white dark:bg-[#1d2125] px-4 py-3">
-                                  <p
-                                    className="font-['Noto_Sans:Regular',sans-serif] text-[13px] text-[#464c59] dark:text-[#9fadbc] m-0 not-italic"
-                                    style={{ fontVariationSettings: "'CTGR' 0, 'wdth' 100" }}
-                                  >
-                                    Expanded match detail for <span className="font-semibold text-[#23262c] dark:text-[#b6c2cf]">{row.name}</span> (prototype
-                                    placeholder).
-                                  </p>
-                                </div>
-                              </div>
-                            </div>
-                          </td>
-                        </tr>
-                      </Fragment>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+            <ExpandableFinScanTable
+              rows={sortedRows}
+              columns={screeningColumns}
+              caption={`${title}, ${sortedRows.length} ${sortedRows.length === 1 ? "row" : "rows"}${statusFilters.size > 0 ? `, filtered by ${[...statusFilters].sort((a, b) => a.localeCompare(b)).join(", ")}` : ""}`}
+              minWidth="min-w-[720px]"
+              expandedIds={expandedIds}
+              onExpandedIdsChange={setExpandedIds}
+              sort={{
+                sortKey,
+                sortDir,
+                onToggleSort: (key) => toggleSort(key as SortKey),
+              }}
+              selection={{
+                selectedIds,
+                isSelectable: (row) => row.status === "New",
+                onToggleRow: toggleRowSelect,
+                onHeaderSelectAll: onHeaderSelectAllChange,
+                headerCheckboxState,
+                actionableCount: actionableRows.length,
+              }}
+              trailingColumn={{
+                render: (row) => (
+                  <button
+                    type="button"
+                    aria-label={`Run match simulation for ${row.name}`}
+                    aria-pressed={activeSimulatorRowId === row.id}
+                    disabled={!onSimulatorRowSelect}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSimulatorRowSelect?.(activeSimulatorRowId === row.id ? null : row.id);
+                    }}
+                    className={cn(
+                      "inline-flex size-8 cursor-pointer items-center justify-center rounded-[4px] border border-[#cfd2d9] dark:border-[#38414a] bg-white dark:bg-[#22272b] text-[#523eb9] transition-all duration-200 ease-out hover:border-[#949baa] hover:bg-[#f4f1fc] dark:hover:bg-[#2c333a] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#523eb9]/35 focus-visible:ring-offset-2",
+                      activeSimulatorRowId === row.id
+                        ? "opacity-100"
+                        : "opacity-0 pointer-events-none group-hover/row:opacity-100 group-hover/row:pointer-events-auto",
+                    )}
+                  >
+                    <FlaskConical className="size-4 shrink-0" strokeWidth={2} aria-hidden />
+                  </button>
+                ),
+              }}
+              getRowClassName={(row) => {
+                const rowDone = row.status === "Escalated";
+                const selected = selectedIds.has(row.id);
+                return cn(
+                  rowDone && "bg-[#f3f4f6] dark:bg-[#2c333a] italic text-[#6a7285] dark:text-[#8696a7]",
+                  !rowDone &&
+                    "bg-white dark:bg-[#22272b] hover:bg-[#f3f4f6] dark:hover:bg-[#2c333a] hover:shadow-[inset_2px_0_0_0_rgba(82,62,185,0.2)]",
+                  selected && !rowDone && "bg-[#f4f1fc]/60 dark:bg-[#38414a]/45",
+                );
+              }}
+              emptyState={sortedRows.length === 0 ? screeningEmptyState : undefined}
+              renderExpandedContent={(row) => (
+                <p className="m-0 font-['Noto_Sans:Regular',sans-serif] text-[13px] not-italic text-[#464c59] dark:text-[#9fadbc]" style={notoVar}>
+                  Expanded match detail for{" "}
+                  <span className="font-semibold text-[#23262c] dark:text-[#b6c2cf]">{row.name}</span> (prototype
+                  placeholder).
+                </p>
+              )}
+            />
           </div>
         </div>
       </div>
