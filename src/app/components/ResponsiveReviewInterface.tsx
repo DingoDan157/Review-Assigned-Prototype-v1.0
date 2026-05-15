@@ -1378,8 +1378,10 @@ export function ResponsiveReviewInterface() {
           <SideDrawer
             isOpen={simulatorRow !== null && simulatorPresentation === "drawer"}
             onClose={closeSimulator}
-            widthStorageKey="review-assigned-match-simulator-drawer-width"
-            defaultWidth={420}
+            widthStorageKey="review-assigned-match-simulator-drawer-width-v2"
+            defaultWidth={580}
+            minWidth={360}
+            maxWidth={960}
             className="self-stretch"
           >
             {simulatorRow && simulatorPresentation === "drawer" ? (
